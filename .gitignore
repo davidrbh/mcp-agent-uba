@@ -1,0 +1,47 @@
+# .gitignore
+__pycache__/
+*.py[cod]
+.env
+.venv
+env/
+venv/
+.idea/
+.vscode/
+dist/
+build/
+*.egg-info/
+.DS_Store
+
+# Turborepo
+.turbo/
+
+# Logs
+logs/
+*.log
+
+# Base de datos local
+postgres_data/
+mysql_data/
+data/chroma_db/
+chroma_db/
+waha_sessions/
+mysql_dump/
+data/*.yaml
+
+# Node.js / TypeScript
+node_modules/
+npm-debug.log
+pnpm-debug.log*
+yarn-error.log
+
+# Monorepo / Services artifacts
+services/*/dist/
+services/*/coverage/
+apps/*/.chainlit/
+apps/*/pt_cache/
+
+# New Logs structure
+data/logs/
+
+# MkDocs output
+site/

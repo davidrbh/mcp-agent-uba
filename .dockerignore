@@ -1,0 +1,20 @@
+.git
+.gitignore
+.env
+.env.*
+node_modules
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+.venv
+.DS_Store
+
+# Archivos pesados o de sesión que no deben ir a la imagen
+mysql_dump
+data/chroma_db
+waha_sessions
+.waha_sessions
+.turbo
+.files
+deploy

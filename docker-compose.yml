@@ -1,0 +1,157 @@
+services:
+  # -------------------------------------------------------
+  # 1.2 SIDECAR: API (Python)
+  # -------------------------------------------------------
+  mcp-api:
+    container_name: mcp-api
+    build:
+      context: .
+      dockerfile: services/mcp-api-sidecar/Dockerfile
+    networks:
+      - sql-agent-network
+    env_file:
+      - .env
+    environment:
+      - API_BASE_URL=${API_BASE_URL}
+      - API_AUTH_HEADER=${API_AUTH_HEADER}
+      - API_AUTH_VALUE=${API_AUTH_VALUE}
+      - PORT=3003
+      - SWAGGER_JSON_PATH=/app/docs/swagger.json
+    volumes:
+      - ./services/mcp-api-sidecar/src:/app/src
+      - ./docs/reference/api/swagger.json:/app/docs/swagger.json
+    ports:
+      - "3003:3003"
+    restart: unless-stopped
+
+  # -------------------------------------------------------
+  # 1.5 MEMORIA: PostgreSQL (LangGraph Persistence)
+  # -------------------------------------------------------
+  agent-memory:
+    container_name: agent-memory
+    image: postgres:16-alpine
+    networks:
+      - sql-agent-network
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${MEMORY_DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${MEMORY_DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${MEMORY_DB_NAME:-agent_memory}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # -------------------------------------------------------
+  # 2. CEREBRO: Agent Host (Python API)
+  # -------------------------------------------------------
+  agent-host: &agent-base
+    container_name: agent-host
+    build:
+      context: .
+      dockerfile: apps/agent-host/Dockerfile
+    networks:
+      - sql-agent-network
+    env_file:
+      - .env
+    environment:
+      # Configuración de Memoria Persistente
+      - DB_URI=postgresql://${MEMORY_DB_USER:-postgres}:${MEMORY_DB_PASSWORD:-postgres}@agent-memory:5432/${MEMORY_DB_NAME:-agent_memory}
+
+      # Configuración SOA (MCP Servers) - Tomada de .env
+      - MCP_SERVERS_CONFIG=${MCP_SERVERS_CONFIG}
+
+      # Fallbacks Legacy
+      - SIDECAR_URL=${SIDECAR_URL}
+      - PYTHONPATH=/app/src
+      - BUSINESS_CONTEXT_PATH=/app/config/business_context.yaml
+      - PYTHONUNBUFFERED=1
+      - WAHA_BASE_URL=${WAHA_BASE_URL}
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - WHATSAPP_WEBHOOK_URL=${WHATSAPP_WEBHOOK_URL}
+    volumes:
+      - ./apps/agent-host/src:/app/src
+      - ./config:/app/config
+      - ./docs:/app/docs
+      - ./scripts:/app/scripts
+      - ./apps/agent-host/docker-entrypoint.sh:/app/docker-entrypoint.sh
+      - ./data:/app/data
+    depends_on:
+      - mcp-mysql
+      - agent-memory
+    ports:
+      - "8000:8000"
+    command: uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+
+  # -------------------------------------------------------
+  # 3. CANAL: Telegram Bot
+  # -------------------------------------------------------
+  telegram-bot:
+    <<: *agent-base
+    container_name: telegram-bot
+    ports: []
+    command: python src/channels/telegram/entry.py
+    restart: unless-stopped
+    environment:
+      - SIDECAR_URL=${SIDECAR_URL}
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/src
+      - BUSINESS_CONTEXT_PATH=/app/config/business_context.yaml
+      - SKIP_GENERATION=true
+
+  # -------------------------------------------------------
+  # 4. CANAL: WhatsApp (WAHA)
+  # -------------------------------------------------------
+  waha:
+    container_name: waha
+    image: devlikeapro/waha:latest-2026.1.4
+    networks:
+      - sql-agent-network
+    ports:
+      - "3001:3000"
+    env_file:
+      - .env
+    environment:
+      - WHATSAPP_API_KEY=${WAHA_API_KEY}
+      - WHATSAPP_SWAGGER_USERNAME=${WHATSAPP_SWAGGER_USERNAME}
+      - WHATSAPP_SWAGGER_PASSWORD=${WHATSAPP_SWAGGER_PASSWORD}
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WHATSAPP_DEFAULT_SESSION=default
+      - WHATSAPP_START_SESSION=default
+      - WHATSAPP_WEBHOOK_URL=${WHATSAPP_WEBHOOK_URL}
+      - WHATSAPP_WEBHOOK_EVENTS=message
+      - WAHA_PUPPETEER_ARGS=--disable-dev-shm-usage --no-sandbox
+    volumes:
+      - ./waha_sessions:/app/.sessions
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: on-failure
+
+  # -------------------------------------------------------
+  # 5. DOCUMENTACIÓN
+  # -------------------------------------------------------
+  docs:
+    container_name: docs
+    build:
+      context: .
+      dockerfile: docs.Dockerfile
+    networks:
+      - sql-agent-network
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./docs:/app/docs
+      - ./mkdocs.yml:/app/mkdocs.yml
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  sql-agent-network:
+    driver: bridge

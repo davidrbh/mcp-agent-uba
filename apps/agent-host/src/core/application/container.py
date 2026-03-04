@@ -1,0 +1,70 @@
+"""
+Contenedor de inyección de dependencias.
+
+Este módulo implementa el patrón Container para gestionar el ciclo de vida
+de las dependencias compartidas de la aplicación, como la persistencia y
+los proveedores de herramientas.
+"""
+
+import os
+import logging
+from typing import Optional
+
+from infra.config.loader import ConfigLoader
+from infra.memory.postgres_checkpointer import PostgresCheckpointer
+from infra.mcp.tool_provider import MCPToolProvider
+from core.application.tool_manager import CompositeToolProvider
+
+logger = logging.getLogger(__name__)
+
+class Container:
+    """
+    Contenedor de Inyección de Dependencias para el ecosistema del agente.
+    
+    Esta clase gestiona el ciclo de vida de componentes de infraestructura compartidos 
+    como pools de conexiones y clientes MCP, asegurando que se usen singletons.
+    """
+
+    _checkpointer: Optional[PostgresCheckpointer] = None
+    _tool_provider: Optional[CompositeToolProvider] = None
+
+    @classmethod
+    def get_checkpointer(cls) -> PostgresCheckpointer:
+        """
+        Devuelve el singleton global del checkpointer PostgreSQL.
+        
+        Returns:
+            PostgresCheckpointer: Instancia del checkpointer configurado.
+        """
+        if cls._checkpointer is None:
+            db_uri = os.getenv("DB_URI")
+            if not db_uri:
+                db_uri = "postgresql://postgres:postgres@localhost:5432/agent_memory"
+            
+            cls._checkpointer = PostgresCheckpointer(db_uri)
+        return cls._checkpointer
+
+    @classmethod
+    def get_tool_provider(cls) -> CompositeToolProvider:
+        """
+        Devuelve el singleton global del proveedor de herramientas compuesto.
+        
+        Returns:
+            CompositeToolProvider: Instancia del proveedor de herramientas.
+        """
+        if cls._tool_provider is None:
+            config_json = ConfigLoader.get_mcp_config()
+            mcp_provider = MCPToolProvider(config_json)
+            cls._tool_provider = CompositeToolProvider(mcp_provider)
+        return cls._tool_provider
+
+    @classmethod
+    async def cleanup(cls):
+        """
+        Cierra ordenadamente todos los recursos compartidos.
+        """
+        if cls._checkpointer:
+            await cls._checkpointer.close()
+        if cls._tool_provider:
+            await cls._tool_provider.close()
+        logger.info("Recursos del contenedor limpiados.")

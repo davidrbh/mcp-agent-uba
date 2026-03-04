@@ -1,0 +1,15 @@
+app:
+  name: "SQL Agent OSS"
+  version: "0.1.0"
+  debug: false
+
+llm:
+  #provider: "google" # Opciones: google, openai
+  #model: "gemini-2.0-flash" # Opciones: gemini-2.0-flash, gpt-4o, etc.
+
+  provider: "deepseek"
+  model: "deepseek-chat"
+  temperature: 0.0 # 👈 CRÍTICO: La doc recomienda 0.0 para Coding
+
+database:
+  timeout: 30

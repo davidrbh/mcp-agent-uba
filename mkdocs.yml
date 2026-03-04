@@ -1,0 +1,58 @@
+site_name: SQL Agent OSS
+site_description: "Arquitectura Híbrida de Agentes SQL con protocolo MCP"
+repo_url: https://github.com/tu-usuario/sql-agent-oss # Opcional
+repo_name: sql-agent-oss
+
+theme:
+  name: material
+  palette:
+    # Modo Oscuro por defecto (Hacker style)
+    - scheme: slate
+      primary: teal
+      accent: cyan
+    # Toggle para modo claro
+    - scheme: default
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+# 🔌 CONFIGURACIÓN CRÍTICA PARA TU ÁRBOL
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [apps/agent-host/src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+
+nav:
+  - Inicio: index.md
+  - Conceptos:
+      - 'Arquitectura SOA': concepts/architecture.md
+      - 'Capa Semántica y Seguridad': concepts/semantic-layer.md
+      - 'Límites del Proyecto': concepts/boundaries.md
+  - Guías de Setup:
+      - 'Integración WhatsApp': guides/setup/whatsapp-integration.md
+      - 'Integración Telegram': guides/setup/telegram-integration.md
+  - Guías de Desarrollo:
+      - 'Extender el Agente': guides/development/extending-the-agent.md
+      - 'Personalizar UI (Chainlit)': guides/development/chainlit-ui.md
+  - Referencia Técnica:
+      - 'Infraestructura Docker': reference/config/infrastructure.md
+      - 'Agent Core': reference/agent-core.md
+      - 'Features (SQL)': reference/features.md
+      - 'Infra (MCP)': reference/infra.md
+  - ADR (Decisiones):
+      - '0001: Stack Tecnológico': adr/0001-tech-stack.md
+      - '0002: Roadmap v3 (Histórico)': adr/0002-modernization-roadmap-v3.md
