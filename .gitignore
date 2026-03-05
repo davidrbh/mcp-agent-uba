@@ -43,5 +43,8 @@ apps/*/pt_cache/
 # New Logs structure
 data/logs/
 
+# Raw Data
+data/raw/
+
 # MkDocs output
 site/
