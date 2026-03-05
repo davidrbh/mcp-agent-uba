@@ -1,76 +1,80 @@
-# SQL Agent OSS (v4.0)
+# MCP Semantic Orchestrator (Tesis UBA)
 
-**Ecosistema de IA Agéntica SOA con Seguridad AST y Persistencia Transaccional**
+**Agente Orquestador para la Resolución Semántica de Productos en Comercio Electrónico**
 
-_Una plataforma de grado empresarial para interactuar con bases de datos y servicios mediante lenguaje natural, diseñada bajo los principios de Arquitectura Orientada a Servicios (SOA) y Model Context Protocol (MCP)._
+_Una plataforma de Inteligencia Artificial Agéntica diseñada para resolver el problema de Entity Matching en catálogos heterogéneos, utilizando el Model Context Protocol (MCP) y flujos cognitivos deterministas._
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Persistent-orange.svg)](https://langchain-ai.github.io/langgraph/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Cognitive_Engine-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![MCP](https://img.shields.io/badge/MCP-Protocol_v1.0-green.svg)](https://modelcontextprotocol.io/)
-[![Docker](https://img.shields.io/badge/Docker-Microservices-2496ED)](https://www.docker.com/)
+[![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-Metrics-F7931E.svg)](https://scikit-learn.org/)
 [![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 🚀 Novedades v4.0 (The Enterprise Update)
+## 🎯 Propósito del Proyecto
 
-Esta versión introduce cambios radicales en la arquitectura para garantizar seguridad y escalabilidad:
+Este repositorio contiene el código fuente, la arquitectura y los scripts de validación empírica desarrollados como Trabajo de Grado para la **Maestría en Informática Aplicada, Mención Inteligencia Artificial**.
 
--   **🛡️ SQLGuard (Cognitive Firewall):** Validación de consultas mediante análisis de Árbol de Sintaxis Abstracta (AST) y transpilación defensiva. Imposible inyectar DML (`DELETE`, `DROP`) incluso si el LLM alucina.
--   **🔌 Arquitectura SOA/MCP:** El agente ya no tiene drivers de base de datos. Se conecta a "Sidecars" (microservicios) mediante el protocolo estándar MCP.
--   **🧠 Memoria Persistente (ACID):** Nueva base de datos dedicada (`agent-memory`) con PostgreSQL. El agente recuerda el contexto entre reinicios y fallos.
--   **🏗️ Hybrid Slice Architecture:** Código reestructurado para separar limpiamente el Núcleo (Core), la Infraestructura (Infra) y las Capacidades (Features).
+El sistema abandona los algoritmos de emparejamiento léxico tradicionales (como la distancia de Levenshtein) y propone un agente autónomo capaz de comprender el contexto técnico de los productos (hardware, voltajes, números de parte) para unificar catálogos de e-commerce con una precisión matemática.
 
-## 🏗️ Arquitectura del Ecosistema
+## 🚀 Arquitectura y Capacidades
 
-El sistema se compone de servicios Docker orquestados:
+El proyecto implementa un diseño _Domain-Driven_ estructurado bajo el patrón **Hybrid Slice Architecture**:
 
-| Servicio | Rol | Tecnología | Descripción |
-| :--- | :--- | :--- | :--- |
-| `agent-host` | **Cerebro** | Python / FastAPI | Orquestador LangGraph. No tiene acceso directo a datos. |
-| `mcp-mysql` | **Brazo** | Node.js / MCP | Sidecar que ejecuta las consultas SQL de forma aislada. |
-| `agent-memory`| **Memoria** | PostgreSQL 16 | Guarda el estado de las conversaciones y checkpoints. |
-| `waha` | **Boca** | WhatsApp API | Gateway para mensajería (Opcional). |
+- **🧠 Motor Semántico (LangGraph):** Orquestador de estados que evalúa la intención, maneja el historial y ejecuta herramientas MCP sin caer en bucles infinitos.
+- **⚖️ Inferencia Determinista:** Configuración estricta de temperatura (T=0) y enrutamiento forzado (`emit_semantic_prediction`) para transformar el razonamiento de un LLM en salidas binarias (1 = Iguales, 0 = Diferentes).
+- **🔌 Extensibilidad MCP:** Preparado para interactuar de forma segura con Sidecars (microservicios) para la obtención de contexto técnico externo mediante el estándar _Model Context Protocol_.
+- **📊 Pipeline de Evaluación:** Scripts integrados para la extracción secuencial del _WDC Product Data Corpus_ (archivos de +3.9GB) y generación de métricas científicas (Matriz de Confusión, F1-Score).
 
-## 🚀 Guía de Inicio Rápido
+## 🏗️ Estructura del Ecosistema
+
+| Directorio                      | Rol            | Descripción                                                              |
+| :------------------------------ | :------------- | :----------------------------------------------------------------------- |
+| `apps/agent-host/src/core/`     | **Cerebro**    | Orquestador LangGraph (`graph.py`, `state.py`).                          |
+| `apps/agent-host/src/features/` | **Dominio**    | Lógica de negocio para `entity_matching` y Prompts YAML.                 |
+| `data/`                         | **Corpus**     | Almacenamiento local del dataset crudo y las muestras procesadas en CSV. |
+| `scripts/`                      | **Validación** | Rutinas de experimentación cuantitativa y extracción de datos.           |
+
+## 🚀 Guía de Reproducibilidad (Experimento Piloto)
+
+Para auditar y reproducir los resultados obtenidos en la investigación:
 
 ### 1. Prerrequisitos
-- Docker Desktop y Git.
-- Una base de datos MySQL (con tus datos de negocio) accesible desde tu red.
 
-### 2. Configuración
+- Python 3.11+ y Poetry (Gestor de dependencias).
+- Acceso a la API de DeepSeek.
+
+### 2. Configuración del Entorno
+
 1.  Clona el repositorio:
     ```bash
-    git clone https://github.com/tu_usuario/sql-agent-oss.git
-    cd sql-agent-oss
+    git clone [https://github.com/dbarrera/mcp-agent-uba.git](https://github.com/dbarrera/mcp-agent-uba.git)
+    cd mcp-agent-uba
     ```
-2.  Crea tu archivo `.env`:
+2.  Instala las dependencias:
     ```bash
-    cp .env.example .env
+    poetry install
     ```
-3.  Edita `.env` con tus credenciales. **Nota:** Ahora hay una sección nueva para `MEMORY_DB` (puedes dejar los defaults de postgres para desarrollo).
+3.  Configura las variables de entorno (`.env`):
+    ```env
+    DEEPSEEK_API_KEY=tu_clave_aqui
+    ```
 
-### 3. Despliegue
-Levanta el stack completo:
+### 3. Preparación de Datos (WDC Corpus)
+
+Descarga el _Gold Standard_ (`gs_computers.txt`) y el _Training Corpus_ (`offers_english.json.gz`) desde la página oficial del WDC y colócalos en `data/raw/`.
+Luego, extrae la muestra representativa:
+
 ```bash
-docker-compose up --build -d
+poetry run python scripts/prepare_wdc_sample.py
 ```
 
-Esto iniciará el `agent-host` en el puerto `8000`, el sidecar MCP en el `3002` y la base de datos de memoria.
+### 4. Ejecución de la Inferencia
 
-### 4. Uso
-- **Web UI:** Accede a `http://localhost:8000`.
-- **API Docs:** `http://localhost:8000/docs`.
+Lanza el agente orquestador en modo lote (Batch Processing) para evaluar los productos y generar el reporte estadístico:
 
----
+```bash
+poetry run python scripts/run_pilot_evaluation.py
 
-## 📚 Documentación
+```
 
-Toda la documentación técnica se encuentra centralizada en la carpeta [`docs/`](./docs):
-
--   [**Arquitectura v4.0**](./docs/01_architecture/overview.md): Visión profunda del diseño SOA y Hybrid Slice.
--   [**Guía de Configuración**](./docs/setup_guides/): Manuales para integraciones específicas.
-
-## 🤝 Contribución
-Sigue los estándares de `Clean Architecture` definidos en `docs/01_architecture/overview.md`. Las PRs deben pasar la validación de tipos y tests.
-
-## 📄 Licencia
-MIT.
+_Salida esperada: Matriz de Confusión y Reporte de Clasificación (Precision, Recall, F1-Score)._
