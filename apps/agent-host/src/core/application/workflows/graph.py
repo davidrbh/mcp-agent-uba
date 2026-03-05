@@ -1,9 +1,9 @@
 '''
-Orquestador del flujo cognitivo (LangGraph).
+Orquestador del flujo cognitivo (LangGraph) - Versión Tesis UBA.
 
-Este módulo define la máquina de estados (StateGraph) que gobierna el comportamiento
-del agente, incluyendo la clasificación de intención, la invocación del LLM y
-la ejecución segura de herramientas mediante validación AST.
+Este módulo define la máquina de estados que gobierna el comportamiento del agente,
+incluyendo la clasificación de intención, la invocación de DeepSeek y la 
+ejecución concurrente de herramientas MCP y evaluación semántica.
 '''
 
 import os
@@ -11,7 +11,6 @@ import re
 import uuid
 import logging
 import asyncio
-import traceback
 from typing import List, Optional
 
 from langchain_openai import ChatOpenAI
@@ -22,16 +21,19 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from core.domain.state import AgentState
-from features.sql_analysis.tools.sql_guard import SQLGuard
 
 logger = logging.getLogger(__name__) 
 
 
 def intent_classifier_node(state: AgentState) -> dict:
-    '''Clasifica la intención del usuario para optimizar el set de herramientas.'''
+    '''Clasifica la intención del usuario para la Tesis de E-commerce.'''
     conversation_history = []
-    # Tomamos los últimos mensajes relevantes para contexto
-    for msg in state["messages"][-5:]:
+    
+    # Si estamos inyectando productos directamente para evaluación en lote (Batch)
+    if state.get("product_a") and state.get("product_b") and not state.get("messages"):
+        return {"intent": "SEMANTIC_MATCHING"}
+        
+    for msg in state.get("messages", [])[-5:]:
         role = "User" if isinstance(msg, HumanMessage) else "AI"
         content = str(msg.content)[:200]
         conversation_history.append(f"{role}: {content}")
@@ -40,14 +42,13 @@ def intent_classifier_node(state: AgentState) -> dict:
 
     prompt = ChatPromptTemplate.from_template(
         """Eres un clasificador de intenciones experto. Analiza la conversación y clasifica la ÚLTIMA petición en:
-        - DATABASE: Consultas de datos de negocio, conteos, tablas o esquemas.
-        - API: Consultas técnicas sobre capacidades del sistema, endpoints disponibles o estado de servicios.
+        - SEMANTIC_MATCHING: Peticiones para comparar productos, resolver entidades o limpiar catálogos.
         - GENERAL: Saludos o charla casual.
         
         Historial:
         {context}
         
-        Responde ÚNICAMENTE con una palabra: DATABASE, API, o GENERAL.
+        Responde ÚNICAMENTE con una palabra: SEMANTIC_MATCHING o GENERAL.
         """
     )
     
@@ -60,10 +61,10 @@ def intent_classifier_node(state: AgentState) -> dict:
     
     intent = "GENERAL"
     try:
-        chain = prompt | llm
-        intent_raw = chain.invoke({"context": context_str}).content.upper()
-        if "DATABASE" in intent_raw: intent = "DATABASE"
-        elif "API" in intent_raw: intent = "API"
+        if context_str:
+            chain = prompt | llm
+            intent_raw = chain.invoke({"context": context_str}).content.upper()
+            if "SEMANTIC" in intent_raw or "MATCH" in intent_raw: intent = "SEMANTIC_MATCHING"
     except Exception as e:
         logger.error(f"Error en clasificación de intención: {e}")
         
@@ -74,7 +75,6 @@ def intent_classifier_node(state: AgentState) -> dict:
 def parse_deepseek_xml(content: str) -> list:
     '''Parsea llamadas a herramientas en formato XML raw de DeepSeek (robusto a pipes).'''
     tool_calls = []
-    # Soporta tanto | como ｜ (full-width)
     invoke_pattern = r"<[|｜]DSML[|｜]invoke name=\"(.*?)\">(.*?)</[|｜]DSML[|｜]invoke>"
     invokes = re.findall(invoke_pattern, content, re.DOTALL)
     
@@ -95,10 +95,7 @@ def parse_deepseek_xml(content: str) -> list:
 
 
 def sanitize_history_for_llm(messages: List[BaseMessage]) -> List[BaseMessage]:
-    '''
-    Asegura que el historial de mensajes sea válido para la API de OpenAI/DeepSeek.
-    Elimina tool_calls que no tengan su correspondiente ToolMessage.
-    '''
+    '''Asegura que el historial de mensajes sea válido para la API de OpenAI/DeepSeek.'''
     sanitized = []
     i = 0
     while i < len(messages):
@@ -127,22 +124,20 @@ def sanitize_history_for_llm(messages: List[BaseMessage]) -> List[BaseMessage]:
 
 def agent_node(state: AgentState, llm_with_tools: dict, system_prompt: str) -> dict:
     '''Invoca al LLM con refuerzo de instrucciones y sanitización de historial.'''
-    llm_runnable = llm_with_tools.get(state["intent"], llm_with_tools["GENERAL"])
+    llm_runnable = llm_with_tools.get(state.get("intent", "GENERAL"), llm_with_tools["GENERAL"])
 
-    # Optimizamos para Prompt Caching: El grueso del prompt (system_prompt) va SIEMPRE al inicio.
-    # Las instrucciones dinámicas de intención se añaden al final del mensaje de sistema para no romper el prefijo.
     full_system_content = system_prompt
-    if state["intent"] == "DATABASE":
+    if state.get("intent") == "SEMANTIC_MATCHING":
         full_system_content += (
-            "\n\n[INSTRUCCIÓN DINÁMICA]: Estás en modo DATABASE. Prioriza el uso de 'query'."
-        )
-    elif state["intent"] == "API":
-        full_system_content += (
-            "\n\n[INSTRUCCIÓN DINÁMICA]: Estás en modo API. Usa las herramientas de integración disponibles."
+            "\n\n[INSTRUCCIÓN DINÁMICA]: Evalúa los productos usando tus herramientas MCP "
+            "y finaliza obligatoriamente llamando a 'emit_semantic_prediction'."
         )
 
-    messages = state["messages"]
-    # Reemplazamos o insertamos el mensaje de sistema optimizado
+    # Si estamos en modo batch (Tesis), inyectamos los productos como si fueran un mensaje del usuario
+    messages = state.get("messages", [])
+    if not messages and state.get("product_a") and state.get("product_b"):
+        messages = [HumanMessage(content=f"Compara estos productos:\nProducto A: {state['product_a']}\nProducto B: {state['product_b']}")]
+
     if messages and isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=full_system_content)] + messages[1:]
     else:
@@ -154,15 +149,13 @@ def agent_node(state: AgentState, llm_with_tools: dict, system_prompt: str) -> d
         response = llm_runnable.invoke(sanitized_messages)
     except Exception as e:
         logger.error(f"Error invocando LLM: {e}")
-        return {"messages": [AIMessage(content="Lo siento, he tenido un error técnico al procesar tu solicitud.")]}
+        return {"messages": [AIMessage(content="Error técnico al procesar solicitud.")], "error": str(e)}
     
-    # Detección y limpieza de DSML (soporta pipes normales y anchos)
     content_str = str(response.content)
     if not response.tool_calls and ("<|DSML|" in content_str or "<｜DSML｜" in content_str):
         parsed = parse_deepseek_xml(content_str)
         if parsed:
             response.tool_calls = parsed
-            # Limpiamos el contenido de etiquetas XML para que no se vean en la UI
             clean_content = re.sub(r"<[|｜]DSML[|｜].*?>", "", content_str, flags=re.DOTALL).strip()
             response.content = clean_content
             
@@ -174,85 +167,63 @@ def build_graph(
     system_prompt: str, 
     checkpointer: Optional[BaseCheckpointSaver] = None
 ) -> StateGraph:
-    '''Construye el grafo de ejecución con validación y resiliencia.'''
+    '''Construye el grafo de ejecución semántica.'''
     tool_map = {tool.name: tool for tool in tools}
-    guard = SQLGuard(dialect="mysql")
     
     llm = ChatOpenAI(
         model="deepseek-chat", 
-        temperature=0, 
+        temperature=0,  # CRÍTICO PARA LA TESIS: Temperatura 0 para determinismo
         api_key=os.getenv("DEEPSEEK_API_KEY"), 
         base_url="https://api.deepseek.com"
     )
     
-    sql_tools = [t for t in tools if t.name == "query"]
-    api_tools = [t for t in tools if t.name != "query"]
-
     llm_with_tools_map = {
-        "DATABASE": llm.bind_tools(sql_tools),
-        "API": llm.bind_tools(api_tools),
+        "SEMANTIC_MATCHING": llm.bind_tools(tools),
         "GENERAL": llm 
     }
 
     async def validated_tool_node(state: AgentState):
-        '''Ejecuta herramientas en PARALELO con auto-reparación silenciosa.'''
+        '''Ejecuta herramientas y captura la predicción matemática para el State.'''
         last_message = state["messages"][-1]
         
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return {"messages": []}
 
-        from core.application.container import Container
-        tool_provider = Container.get_tool_provider()
+        state_updates = {}
 
-        async def run_single_tool(tool_call, retry=True):
+        async def run_single_tool(tool_call):
             name = tool_call["name"]
             args = tool_call["args"]
             tid = tool_call["id"]
             
             logger.info(f"Iniciando ejecución de herramienta: {name}")
             
-            # Validación de Seguridad AST
-            if name == "query":
-                sql = args.get("sql", "")
-                is_safe, safe_sql, error_msg = guard.validate_and_transpile(sql)
-                if not is_safe:
-                    logger.warning(f"Consulta bloqueada: {error_msg}")
-                    return ToolMessage(content=f"⛔ BLOQUEO DE SEGURIDAD: {error_msg}", tool_call_id=tid, name=name)
-                args["sql"] = safe_sql or sql
+            # --- INTERCEPTOR DE LA TESIS ---
+            if name == "emit_semantic_prediction":
+                state_updates["prediction"] = int(args.get("is_match", 0))
+                state_updates["reasoning"] = str(args.get("reasoning", ""))
 
-            # Obtención dinámica de la herramienta para soportar re-conexión
-            available_tools = await tool_provider.get_tools()
-            tool = next((t for t in available_tools if t.name == name), None)
+            # AQUÍ ESTÁ LA MAGIA: Usamos la lista 'tools' que le pasamos al build_graph
+            # ¡Ya no llamamos al Container ni a la red MCP!
+            tool = next((t for t in tools if t.name == name), None)
             
             if not tool:
                 return ToolMessage(content=f"Error: Herramienta '{name}' no disponible.", tool_call_id=tid, name=name)
 
             try:
-                # Ejecución con timeout estándar
+                # Ejecutamos la herramienta localmente
                 output = await asyncio.wait_for(tool.ainvoke(args), timeout=70.0)
                 return ToolMessage(content=str(output), tool_call_id=tid, name=name)
-            
             except Exception as e:
                 err_info = repr(e)
-                
-                # DETECCIÓN DE CONEXIÓN ROTA Y REINTENTO SILENCIOSO
-                if retry and ("ClosedResourceError" in err_info or "Connection closed" in err_info):
-                    logger.warning(f"🔄 Reintento silencioso para '{name}' tras detectar conexión rota.")
-                    await tool_provider.report_tool_failure(name)
-                    # Recursión simple: un solo reintento para evitar bucles infinitos
-                    return await run_single_tool(tool_call, retry=False)
-
-                # Si el reintento también falla o es otro error, reportamos
                 logger.error(f"Fallo crítico en '{name}': {err_info}")
-                return ToolMessage(
-                    content=f"❌ Error técnico en '{name}': {err_info}", 
-                    tool_call_id=tid, 
-                    name=name
-                )
+                return ToolMessage(content=f"❌ Error en '{name}': {err_info}", tool_call_id=tid, name=name)
 
-        # Ejecución paralela de todas las herramientas
+        # Ejecución paralela
         results = await asyncio.gather(*(run_single_tool(tc) for tc in last_message.tool_calls))
-        return {"messages": list(results)}
+        
+        state_updates["messages"] = list(results)
+        return state_updates
 
     workflow = StateGraph(AgentState)
     workflow.add_node("intent_classifier", intent_classifier_node)
