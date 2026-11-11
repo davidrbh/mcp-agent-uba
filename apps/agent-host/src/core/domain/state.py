@@ -6,7 +6,7 @@ del agente, fusionando la capacidad conversacional con las métricas
 necesarias para la evaluación del Trabajo de Grado.
 """
 
-from typing import TypedDict, Annotated, List, Optional
+from typing import Any, Dict, TypedDict, Annotated, List, Optional
 import operator
 from langchain_core.messages import BaseMessage
 
@@ -43,3 +43,10 @@ class AgentState(TypedDict, total=False):
     # 5. CONTROL DE ERRORES
     # ---------------------------------------------------------
     error: str
+
+    # ---------------------------------------------------------
+    # 6. HABILIDADES INVOCADAS POR CÓDIGO (importador de catálogo, categorías…)
+    # ---------------------------------------------------------
+    task: str                 # Intención declarada; evita la llamada del clasificador
+    task_input: str           # Entrada ya redactada para el modelo
+    outputs: Dict[str, Any]   # Lo emitido por cada herramienta emit_* (nombre -> argumentos)
