@@ -5,6 +5,16 @@ All notable changes to the **SQL Agent OSS** project will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 🧩 Habilidades de catálogo (importación y categorías)
+
+- **`import_mapping`**: empareja las columnas de un inventario con los campos del importador de catálogo. Diccionario primero, agente con `emit_import_plan` solo si hace falta, validador sin IA y fusión que no pisa al diccionario sin una duda explicada.
+- **`categorize`**: asigna categorías de una lista cerrada por tandas; lo inventado o no ubicado queda en `otros`.
+- **Fábrica de LLM** (`infra/llm/factory.py`): DeepSeek o Bedrock por `LLM_PROVIDER`; el grafo ya no tiene el proveedor escrito.
+- **Grafo**: modelo inyectable, `forced_tool`, `terminal_tools`, `task`/`task_input` y `outputs` genéricos para cualquier `emit_*`. La tesis conserva su comportamiento.
+- **Evaluación** (`scripts/run_import_evaluation.py`) con 12 casos sintéticos y **pruebas** (`apps/agent-host/tests`, 10, sin red).
+
 ## [v2.2.0] - 2026-01-11
 
 ### 🚀 WhatsApp Integration & Memory Enhancements

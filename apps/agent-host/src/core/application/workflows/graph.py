@@ -6,14 +6,12 @@ incluyendo la clasificación de intención, la invocación de DeepSeek y la
 ejecución concurrente de herramientas MCP y evaluación semántica.
 '''
 
-import os
 import re
 import uuid
 import logging
 import asyncio
-from typing import List, Optional
+from typing import Any, Iterable, List, Optional
 
-from langchain_openai import ChatOpenAI
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import ToolMessage, SystemMessage, AIMessage, HumanMessage, BaseMessage
@@ -21,14 +19,24 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from core.domain.state import AgentState
+from infra.llm.factory import get_chat_model
 
-logger = logging.getLogger(__name__) 
+logger = logging.getLogger(__name__)
+
+# Prefijo de las herramientas de salida estructurada: lo que el modelo pasa a
+# una herramienta `emit_*` se guarda en `state["outputs"][nombre]`.
+EMIT_PREFIX = "emit_"
 
 
 def intent_classifier_node(state: AgentState) -> dict:
     '''Clasifica la intención del usuario para la Tesis de E-commerce.'''
     conversation_history = []
-    
+
+    # Una habilidad invocada por código declara su tarea: no hace falta gastar
+    # una llamada al modelo para adivinarla.
+    if state.get("task"):
+        return {"intent": state["task"]}
+
     # Si estamos inyectando productos directamente para evaluación en lote (Batch)
     if state.get("product_a") and state.get("product_b") and not state.get("messages"):
         return {"intent": "SEMANTIC_MATCHING"}
@@ -52,17 +60,10 @@ def intent_classifier_node(state: AgentState) -> dict:
         """
     )
     
-    llm = ChatOpenAI(
-        model="deepseek-chat", 
-        temperature=0, 
-        api_key=os.getenv("DEEPSEEK_API_KEY"), 
-        base_url="https://api.deepseek.com"
-    )
-    
     intent = "GENERAL"
     try:
         if context_str:
-            chain = prompt | llm
+            chain = prompt | get_chat_model(temperature=0)
             intent_raw = chain.invoke({"context": context_str}).content.upper()
             if "SEMANTIC" in intent_raw or "MATCH" in intent_raw: intent = "SEMANTIC_MATCHING"
     except Exception as e:
@@ -124,7 +125,8 @@ def sanitize_history_for_llm(messages: List[BaseMessage]) -> List[BaseMessage]:
 
 def agent_node(state: AgentState, llm_with_tools: dict, system_prompt: str) -> dict:
     '''Invoca al LLM con refuerzo de instrucciones y sanitización de historial.'''
-    llm_runnable = llm_with_tools.get(state.get("intent", "GENERAL"), llm_with_tools["GENERAL"])
+    intent = state.get("intent", "GENERAL")
+    llm_runnable = llm_with_tools.get(intent) or llm_with_tools.get("_task") or llm_with_tools["GENERAL"]
 
     full_system_content = system_prompt
     if state.get("intent") == "SEMANTIC_MATCHING":
@@ -137,6 +139,9 @@ def agent_node(state: AgentState, llm_with_tools: dict, system_prompt: str) -> d
     messages = state.get("messages", [])
     if not messages and state.get("product_a") and state.get("product_b"):
         messages = [HumanMessage(content=f"Compara estos productos:\nProducto A: {state['product_a']}\nProducto B: {state['product_b']}")]
+    elif not messages and state.get("task_input"):
+        # Habilidad invocada por código: su entrada llega ya redactada.
+        messages = [HumanMessage(content=state["task_input"])]
 
     if messages and isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=full_system_content)] + messages[1:]
@@ -163,23 +168,36 @@ def agent_node(state: AgentState, llm_with_tools: dict, system_prompt: str) -> d
 
 
 def build_graph(
-    tools: List[BaseTool], 
-    system_prompt: str, 
-    checkpointer: Optional[BaseCheckpointSaver] = None
+    tools: List[BaseTool],
+    system_prompt: str,
+    checkpointer: Optional[BaseCheckpointSaver] = None,
+    llm: Optional[Any] = None,
+    forced_tool: Optional[str] = None,
+    terminal_tools: Iterable[str] = (),
 ) -> StateGraph:
-    '''Construye el grafo de ejecución semántica.'''
-    tool_map = {tool.name: tool for tool in tools}
-    
-    llm = ChatOpenAI(
-        model="deepseek-chat", 
-        temperature=0,  # CRÍTICO PARA LA TESIS: Temperatura 0 para determinismo
-        api_key=os.getenv("DEEPSEEK_API_KEY"), 
-        base_url="https://api.deepseek.com"
-    )
-    
+    '''
+    Construye el grafo de ejecución semántica.
+
+    Args:
+        tools: herramientas disponibles para el agente.
+        system_prompt: prompt del sistema de la habilidad.
+        checkpointer: persistencia de la conversación (opcional).
+        llm: modelo a usar; por defecto el de la fábrica (temperatura 0).
+        forced_tool: si se indica, el modelo está obligado a responder
+            llamando a esa herramienta (salida estructurada garantizada).
+        terminal_tools: herramientas tras las cuales el grafo termina sin
+            volver a llamar al modelo (ahorra una llamada por ejecución).
+    '''
+    # CRÍTICO PARA LA TESIS: temperatura 0 para determinismo (lo fija la fábrica).
+    llm = llm if llm is not None else get_chat_model(temperature=0)
+    terminal = set(terminal_tools)
+
+    bound = llm.bind_tools(tools, tool_choice=forced_tool) if forced_tool else llm.bind_tools(tools)
     llm_with_tools_map = {
-        "SEMANTIC_MATCHING": llm.bind_tools(tools),
-        "GENERAL": llm 
+        "SEMANTIC_MATCHING": bound,
+        "GENERAL": llm,
+        # Cualquier otra tarea declarada (catálogo, categorías…) usa las herramientas.
+        "_task": bound,
     }
 
     async def validated_tool_node(state: AgentState):
@@ -202,6 +220,13 @@ def build_graph(
             if name == "emit_semantic_prediction":
                 state_updates["prediction"] = int(args.get("is_match", 0))
                 state_updates["reasoning"] = str(args.get("reasoning", ""))
+
+            # --- INTERCEPTOR GENÉRICO: cualquier herramienta emit_* deja su salida en el estado ---
+            if name.startswith(EMIT_PREFIX):
+                outputs = dict(state.get("outputs") or {})
+                outputs.update(state_updates.get("outputs") or {})
+                outputs[name] = args
+                state_updates["outputs"] = outputs
 
             # AQUÍ ESTÁ LA MAGIA: Usamos la lista 'tools' que le pasamos al build_graph
             # ¡Ya no llamamos al Container ni a la red MCP!
@@ -238,6 +263,12 @@ def build_graph(
         return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
 
     workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
+
+    def after_tools(state: AgentState):
+        # Si el modelo ya emitió su salida final, no se le vuelve a llamar.
+        calls = next((m.tool_calls for m in reversed(state["messages"]) if isinstance(m, AIMessage) and m.tool_calls), [])
+        return END if terminal and any(c["name"] in terminal for c in calls) else "agent"
+
+    workflow.add_conditional_edges("tools", after_tools, {"agent": "agent", END: END})
 
     return workflow.compile(checkpointer=checkpointer)

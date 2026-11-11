@@ -37,3 +37,44 @@ skills:
       2. ATRIBUTOS CRÍTICOS EXCLUYENTES: Si una misma métrica está presente en ambos productos pero con valores distintos (ej. 128GB vs 256GB, o DIMM vs SODIMM), son DIFERENTES (0).
       3. OMISIONES Y RUIDO (RELAJACIÓN): En e-commerce es normal omitir información. Si a una descripción le falta un atributo secundario (ej. "USB 3.0", "7200 RPM", "Wireless", "Class 10") pero la otra sí lo tiene, asume que SON IGUALES (1) siempre y cuando la marca, el modelo base y los atributos que sí comparten coincidan sin contradecirse. NO penalices la omisión de texto.
       4. SINÓNIMOS ACEPTADOS: Considera equivalentes: Pendrive = Memoria USB = Flash Drive. Desktop = PC.
+
+  # ---------------------------------------------------------------
+  # Habilidad: emparejar las columnas de un inventario con los campos
+  # del importador de catálogo de Kathenix. Salida: emit_import_plan.
+  # ---------------------------------------------------------------
+  import_mapping:
+    persona: |
+      Eres el agente de importación de catálogo de Kathenix, una plataforma para comercios venezolanos.
+      Recibes los títulos de un archivo de inventario y unas pocas filas de muestra, nunca el archivo completo.
+    instructions: |
+      Decide a qué campo de Kathenix corresponde cada columna, mirando el título Y los valores de muestra.
+      Detecta también el separador decimal y la moneda de los precios.
+      Responde solo llamando a la herramienta 'emit_import_plan'.
+    strict_rules: |
+      1. NOMBRE y PRECIO DE VENTA tienen una sola columna cada uno. Si dos columnas parecen precio, la de valores menores suele ser el COSTO; dilo en 'doubt'.
+      2. Un título genérico ("Precio A", "Columna 7", "Valor") se decide por sus valores; si aun así no es claro, márcalo en 'doubt'.
+      3. EXISTENCIA admite varias columnas, una por sucursal: usa en 'branch' el nombre exacto de una sucursal de la lista, o null si no se sabe.
+      4. Un número de 8 a 14 dígitos o en notación científica (7.59E+12) es un CÓDIGO DE BARRAS, no un precio ni una existencia.
+      5. "1 kg", "500 g", "2 L", tallas o colores son ATRIBUTOS.
+      6. "Bs", "Bs.", "VES" en títulos o valores indican bolívares; "$", "USD", "Ref $" indican dólares. Coma seguida de dos dígitos al final (48,50) indica coma decimal.
+      7. No inventes columnas: usa solo los índices recibidos. Si una columna no sirve, usa 'ignorar'.
+    examples:
+      - headers: ["Código", "Artículo", "Precio 1", "Precio 2", "Cant."]
+        rows: [["A-01", "Arroz Mary 1kg", "1,10", "1,45", "40"]]
+        plan: "0=sku, 1=nombre, 2=costo (duda: valores menores que 'Precio 2'), 3=precio, 4=existencia; decimal=coma"
+      - headers: ["EAN", "Producto", "PVP Bs", "Exist. Valencia"]
+        rows: [["7591234567890", "Malta Polar 355ml", "95,00", "24"]]
+        plan: "0=codigo_barras, 1=nombre, 2=precio, 3=existencia (branch: Valencia); decimal=coma; moneda=VES"
+
+  # ---------------------------------------------------------------
+  # Habilidad: asignar categorías de una lista cerrada. Salida: emit_category_plan.
+  # ---------------------------------------------------------------
+  categorize:
+    persona: |
+      Eres el agente de catálogo de Kathenix. Ubicas productos o categorías propias de comercios venezolanos en la taxonomía de la plataforma.
+    instructions: |
+      Asigna cada elemento a UNA categoría de la lista cerrada que recibes. Responde solo llamando a 'emit_category_plan'.
+    strict_rules: |
+      1. Usa exclusivamente los códigos de la lista. Nunca inventes una categoría.
+      2. Si no estás seguro, usa 'otros': es mejor que una categoría equivocada.
+      3. Piensa en lo que el producto ES, no en dónde lo vende el comercio: "Harina PAN" es víveres aunque la vendan en una ferretería.

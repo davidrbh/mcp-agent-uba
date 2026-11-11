@@ -44,6 +44,7 @@ pyyaml = "^6.0.1"
 langchain-google-genai = "^4.1.3"
 google-generativeai = "^0.8.6"
 langchain-openai = "^1.1.6"
+langchain-aws = "^1.9.3"  # Bedrock (proveedor dentro de AWS)
 langchain-community = "^0.4.1"
 tiktoken = "^0.12.0"
 fastapi = "^0.128.0"
